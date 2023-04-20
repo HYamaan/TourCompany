@@ -11,8 +11,8 @@ const app = express();
 if(process.env.NODE_ENV==='development'){
     app.use(morgan('dev'));
 }
-const error = new Error("An error message")
-console.log(error.stack)
+// const error = new Error("An error message")
+// console.log(error.stack)
 
 app.use(express.json());
 app.use(express.static(`${__dirname}/public`))
@@ -23,7 +23,7 @@ app.use((req,res,next)=>{
 })
 
 app.use('/api/v1/tours', tourRouter);
-app.use('/api/v1/user', userRouter);
+app.use('/api/v1/users', userRouter);
 
 app.all('*',(req,res,next)=>{
     next(new AppError(`Can't find ${req.originalUrl} on this server!`,404));
