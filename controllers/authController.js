@@ -2,7 +2,7 @@
 const User=require('./../models/userModel.js');
 
 const catchAsync = require('./../utils/catchAsync.js');
-const signToken = require('./signToken');
+const signToken = require('./../token/signToken');
 const AppError=require('./../utils/appError');
 const sendEmail=require('./../utils/email');
 
@@ -11,19 +11,22 @@ const fs=require('fs');
 const crypto = require('crypto');
 const {promisify} = require('util');
 
- exports.signup=catchAsync(async (req,res,next)=>{
+  const createSendToken=(user,statusCode,res,url)=>{
+    const token =  signToken(user,url);
+    res.status(statusCode).json({
+      status:'success',
+      token,
+      data:{
+        user
+      }
+    })
+  }
 
+ exports.signup=catchAsync(async (req,res,next)=>{
    const {name,email,password,passwordConfirm}=req.body
    const newUser = await User.create({name,email,password,passwordConfirm});
+   createSendToken(newUser,201,res,req.originalUrl);
 
-   const token =  signToken(newUser,req.originalUrl);
-   res.status(201).json({
-     status:'success',
-     token,
-     data:{
-       user:newUser
-     }
-   })
  });
 
  exports.login=catchAsync(async (req,res,next)=>{
@@ -34,17 +37,13 @@ const {promisify} = require('util');
    };
    const user = await User.findOne({email:email}).select('+password');
 
-   const matchPassword = await user.correctPassword(password,user.password);
+   const matchPassword = await user.correctPassword(user.password,password);
 
    if(!user || !matchPassword){
-     return next(new AppError('Incorrect email or password',404));
+     return next(new AppError('Incorrect email or password',401));
    }
-  const token = signToken(user,req.originalUrl);
-   console.log("token",token);
-   res.status(201).json({
-     status:'success',
-     token
-   })
+
+   createSendToken(user,200,res,req.originalUrl);
  });
 
  exports.protect=catchAsync(async (req,res,next)=>{
@@ -62,7 +61,7 @@ const {promisify} = require('util');
      return next( new AppError('You are not logged in! Please log in to get access.',401));
    }
    const decoded = await promisify(jwt.verify)(token,publicKey)
-   console.log(decoded);
+
    const freshUser = await User.findById(decoded.id);
    if(!freshUser){
      return next(new AppError('The user belonging to this token does no longer exist.',401));
@@ -91,8 +90,7 @@ const {promisify} = require('util');
 
 
  exports.forgetPassword = catchAsync(async (req,res,next)=>{
-   const readFile=promisify(fs.readFile);
-   const privateKey = await readFile(`./key/private.key`);
+
    //POST EMAİL
    const user = await User.findOne({email:req.body.email});
    if(!user){
@@ -125,18 +123,53 @@ const {promisify} = require('util');
      user.passwordResetToken = undefined;
      user.passwordResetExpires = undefined;
      await user.save({ validateBeforeSave: false });
+     // User.findByIdAndUpdate fonksiyonu kullanmamız halinde model shcema kısmında .pre kısımları çalışmaz. getResetToken,getResetDate çalışamaz.
 
      return next(
        new AppError('There was an error sending the email. Try again later!'),
        500
      );
    }
+ })
+ exports.resetPassword = catchAsync(async (req,res,next)=>{
+   //Get base token
+   const hashedToken = crypto.createHash('sha256').update(req.params.token).digest("hex");
+   //if is user set new password
+   const user = await User.findOne({
+     passwordResetToken:hashedToken,
+     passwordResetExpires:{$gt:Date.now()}
+   });
+   if(!user){
+     return next(new AppError('Token is invalid or has expired',400));
+   }
+   //updatechangePasswordAt
+   user.password=req.body.password;
+   user.passwordConfirm = req.body.passwordConfirm;
+   user.passwordResetToken = undefined;
+   user.passwordResetExpires=undefined;
+   await user.save();
+   // User.findByIdAndUpdate fonksiyonu kullanmamız halinde model shcema kısmında .pre kısımları çalışmaz. getResetToken,getResetDate çalışamaz.
+   //Log user,sent JWT
+
+   createSendToken(user,200,res,req.originalUrl);
+ });
+
+ exports.updatePassword = catchAsync(async (req,res,next)=>{
+
+   const user = await User.findOne({_id:req.user._id}).select('+password');
+   console.log(user.password,"\n",req.body.currentPassword.toString());
+   if(!user){
+     return next( new AppError('You are not logged in! Please log in to get access.',401));
+   }
+
+   const match =await user.correctPassword(user.password,req.body.currentPassword);
+   if(!match){
+     return next( new AppError('You must write true current Password',401));
+   }
+   user.password = req.body.password;
+   user.passwordConfirm = req.body.passwordConfirm;
+   await user.save();
+   // User.findByIdAndUpdate fonksiyonu kullanmamız halinde model shcema kısmında .pre kısımları çalışmaz. getResetToken,getResetDate çalışamaz.
+
 
  })
- exports.resetPassword = (req,res,next)=>{
-   //Get base token
-   const hashedToken = crypto.createHash('sha256').update(req.params.token);
-   //if is user set new password
-   //updatechangePasswordAt
-   //Log user,sent JWT
- }
