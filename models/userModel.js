@@ -47,14 +47,22 @@ const userSchema = new mongoose.Schema({
 userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 15);
+  //Gereksiz yer kaplamasına engel oldum
   this.passwordConfirm = undefined;
-  this.changePasswordAt = new Date();
   next();
 });
 
+userSchema.pre('save',function(next){
+  if (!this.isModified('password') ||this.isNew) return next();
+  // token oluşturma işleminden önce gelebiliyor -1000 bu nedenle yazdım.
+  this.changePasswordAt = new Date() - 1000;
+  next();
+})
+
 userSchema.methods.correctPassword = async function(candidatePassword, userPassword) {
-  return await bcrypt.compare(candidatePassword, userPassword);
+  return await bcrypt.compare(userPassword,candidatePassword);
 };
+
 userSchema.methods.changedPasswordAfter = function(JWTtimesiat) {
   if (this.changePasswordAt) {
     const changedTimestamp = parseInt(this.changePasswordAt.getTime() / 1000, 10);
@@ -66,7 +74,7 @@ userSchema.methods.changedPasswordAfter = function(JWTtimesiat) {
 userSchema.methods.createPasswordResetToken = function(){
   const resetToken = crypto.randomBytes(32).toString('hex');
  this.passwordResetToken= crypto
-    .createHash('SHA256')
+    .createHash('sha256')
     .update(resetToken)
     .digest('hex');
 
